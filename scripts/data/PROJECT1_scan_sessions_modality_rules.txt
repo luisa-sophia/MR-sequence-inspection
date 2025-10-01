@@ -1,0 +1,9 @@
+Rules used to determine if a scan exists for a certain modality and session.                              
+The 'series_description' field in the dicom header is used as reference.
+
+T1w: lambda x: t1 in x and UNI in x and 0.75 in x
+T2w: lambda x: t2 in x
+fMRI: lambda x: face in x and ap in x and not SBRef in x
+DWI: lambda x: resolve_COR in x
+DTI: lambda x: dti in x
+
