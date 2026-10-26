@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Blocks commits that add lines containing absolute paths (also in notebook outputs).
+# Enable once per clone:   git config core.hooksPath hooks
+# Bypass in an emergency:  git commit --no-verify
+
+PATTERN='(/mnt/|/media/|/home/|/Users/|[A-Za-z]:\\)'
+
+hits=$(git diff --cached -U0 --no-color -- . ':(exclude)*hooks/pre-commit' ':(exclude)*README.md' \
+    | grep -E '^\+[^+]' | grep -E "$PATTERN")
+
+if [ -n "$hits" ]; then
+    echo "pre-commit: absolute paths found in staged changes:"
+    echo "$hits" | cut -c1-200
+    echo
+    echo "Move them to a gitignored config in configs/, or clear the notebook outputs."
+    exit 1
+fi

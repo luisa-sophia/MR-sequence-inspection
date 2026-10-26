@@ -1,4 +1,10 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
-*.py[codz]
-*$py.class
+*.py[cod]
+.ipynb_checkpoints/
+
+# only the template config is tracked
+configs/*
+!configs/template.py
+
+# outputs contain session ids
+output/
