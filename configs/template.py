@@ -1,6 +1,6 @@
 """
 Template config. Copy it to e.g. configs/myproject.py and fill it in.
-Everything in configs/ except this template is gitignored.
+Everything in configs/ except this template and the shared MRE configs is gitignored.
 
 All public variables are read as config options (unknown names raise an error),
 so prefix helper variables with '_'.
@@ -11,6 +11,8 @@ identifier = "PROJECT1"
 # Prefix for all relative paths below (e.g. where the lab drive is mounted).
 # Can also be left as None here and passed in the notebook: load_config(..., root="...")
 root = None
+# Or: find the root automatically, it is the first folder above the notebook folder containing this file
+# root_marker = ".drive_root.txt"
 
 # === DICOM input (relative to root, or absolute)
 dicom_root = "path/to/dicom/root"
@@ -18,17 +20,34 @@ dicom_root = "path/to/dicom/root"
 dcm_pattern = f"{dicom_root}/{{subject}}/SCANS/*/DICOM/*.dcm"
 # a folder is a session if it contains this subfolder (None: every subfolder of dicom_root)
 session_marker = "SCANS"
-ignore = ["pilot"]       # skip folders containing these strings (case insensitive)
+ignore = ["pilot", "__MACOSX"]  # skip folders containing these strings (case insensitive)
 exclude_sessions = []
 
 # === output, relative to the notebook folder (gitignored)
 output_dir = "output"
+# output_in_root = True   # output_dir is relative to root instead (e.g. a summary folder on the drive)
 drop_columns = ["patient_age", "patient_sex"]
+
+# === heudiconv
+# heuristic for the dicominfo step. For enhanced dicoms (XB10 platform) use the modified one,
+# it extracts TR/TE which heudiconv misses for this format:
+# info_heuristic = "heuristics/convertall_enhancedcm_mod.py"
+info_heuristic = "convertall"
+# run heudiconv in apptainer instead of the installed one: .sif file or folder with heudiconv*.sif (pulled if missing)
+container = None
+container_tmp = None     # apptainer cache / work folder
+# image pulled into the container folder as heudiconv_<version>.sif. Keep a fixed version (not 'latest'),
+# a newer heudiconv / dcm2niix can give slightly different BIDS output
+container_image = "docker://nipy/heudiconv:1.5.1"
+
+# === BIDS conversion (optional): python -m seqinspect.convert configs/myproject.py --all
+bids_dir = None          # e.g. "path/to/BIDS" (relative to root, or absolute)
+bids_heuristic = None    # e.g. "heuristics/heuristic_myproject.py"
 
 # === modality rules, checked against the dicom series_description
 # include: all substrings must be present, exclude: none may be present.
-# A rule can also be a function, e.g. lambda x: "t1" in x.lower()
-# First matching rule wins. Remove/add entries as you like.
+# A rule can also be a regex string / list of regex strings (case insensitive, any of them),
+# e.g. "^(?!.*fmre).*mre_", or a function, e.g. lambda x: "t1" in x.lower()
 modalities = {
     "T1w":  {"include": ["t1", "UNI", "0.75"]},
     "T2w":  {"include": ["t2"]},
@@ -37,6 +56,8 @@ modalities = {
     "DTI":  {"include": ["dti"]},
     "MRE":  {"include": ["tomomre"]},
 }
+exclusive_rules = True   # True: first matching rule wins. False: a scan can count for several modalities
+count_scans = False      # False: 1/0 per modality. True: number of matching scans
 
 # optional: set to None if not needed
 fmri_blocks = {

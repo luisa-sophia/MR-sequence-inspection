@@ -7,15 +7,19 @@ A Config can be created in three ways:
     cfg = load_config("configs/myproject.py", root="/some/root")  # config file + overrides
     cfg = Config(root="/some/root", dicom_root="...", ...)          # quick inline config
 
-Relative paths (dicom_root, dcm_pattern, file_checks globs) are joined with `root`.
+Relative paths (dicom_root, dcm_pattern, file_checks globs, bids_dir) are joined with `root`.
 Absolute paths are used as they are, `root` can then be left empty.
+Instead of `root`, a `root_marker` file can be given: the root is then the first folder
+(going upwards from the current dir) that contains this file, e.g. '.drive_root.txt' on the lab drive.
 
 Author: Luisa Seckinger
 """
 import os
+import re
 import runpy
 import types
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Callable
 
 import yaml
@@ -25,6 +29,8 @@ import yaml
 class Config:
     # prefix for all relative paths below (e.g. the lab drive mount point)
     root: str | None = None
+    # alternative to root: name of a marker file, root = first folder above the current dir containing it
+    root_marker: str | None = None
     # used as prefix for output file names
     identifier: str = "PROJECT"
 
@@ -40,15 +46,37 @@ class Config:
     ignore_hidden: bool = True
     exclude_sessions: list[str] = field(default_factory=list)
 
-    # === output (relative to the current working dir, NOT to root)
+    # === output (relative to the current working dir, NOT to root, unless output_in_root=True)
     output_dir: str = "output"
+    output_in_root: bool = False
     # columns removed from the dicominfo.tsv files
     drop_columns: list[str] = field(default_factory=lambda: ["patient_age", "patient_sex"])
 
+    # === heudiconv
+    # heuristic for the dicominfo step: "convertall" or a path to a .py file (relative to the notebook folder)
+    info_heuristic: str = "convertall"
+    # apptainer image (.sif file, or a folder with heudiconv*.sif in it, pulled if missing). None: installed heudiconv
+    container: str | None = None
+    # image that is pulled into the container folder. Pin a version (not 'latest') so results are reproducible
+    container_image: str = "docker://nipy/heudiconv:1.5.1"
+    # apptainer cache / work folder (only used with container)
+    container_tmp: str | None = None
+
+    # === BIDS conversion (optional, seqinspect.convert)
+    bids_dir: str | None = None
+    # heuristic .py for the conversion (relative to the notebook folder, or absolute)
+    bids_heuristic: str | None = None
+
     # === classification
-    # name -> rule. A rule is either {"include": [...], "exclude": [...]} (substrings of the
-    # series_description) or a python callable str -> bool. First matching rule wins.
+    # name -> rule. A rule is one of:
+    #   {"include": [...], "exclude": [...]}  substrings of the series_description
+    #   "regex" or ["regex", ...]             case insensitive, any of them anywhere in the series_description
+    #   a python callable str -> bool
     modalities: dict = field(default_factory=dict)
+    # True: first matching rule wins. False: a scan can count for several modalities
+    exclusive_rules: bool = True
+    # False: 1/0 per modality. True: number of matching scans
+    count_scans: bool = False
     # optional, e.g. {"modality": "fMRI", "trs_per_block": 418, "threshold": 0.4}
     fmri_blocks: dict | None = None
     # optional checks for data heudiconv does not see, e.g. spectroscopy:
@@ -56,6 +84,10 @@ class Config:
     file_checks: dict = field(default_factory=dict)
     # optional python sort key for session ids (default: alphabetical)
     sort_key: Callable[[str], object] | None = None
+
+    def __post_init__(self):
+        if self.root is None and self.root_marker:
+            self.root = str(find_root_with_marker(Path.cwd(), self.root_marker))
 
     # ---------------------------------------------------------------------
     def path(self, p: str) -> str:
@@ -67,7 +99,8 @@ class Config:
 
     @property
     def out_dir(self) -> str:
-        return os.path.abspath(os.path.join(self.output_dir, self.identifier))
+        output_dir = self.path(self.output_dir) if self.output_in_root else self.output_dir
+        return os.path.abspath(os.path.join(output_dir, self.identifier))
 
     def show(self):
         print(f"=== Config '{self.identifier}' " + "=" * 50)
@@ -76,6 +109,13 @@ class Config:
         print(f"{'-> dicom_root':18} = {self.path(self.dicom_root)}  (exists: {os.path.isdir(self.path(self.dicom_root))})")
         print(f"{'-> out_dir':18} = {self.out_dir}")
         print("=" * 72)
+
+
+def find_root_with_marker(start: Path, marker: str) -> Path:
+    for p in [start] + list(start.parents):
+        if (p / marker).exists():
+            return p
+    raise FileNotFoundError(f"Marker '{marker}' indicating root level of drive not found above '{start}'.")
 
 
 def _read_py(path: str) -> dict:
@@ -106,6 +146,10 @@ def matches(rule, series_description: str) -> bool:
     """Check a series description against one modality rule."""
     if callable(rule):
         return bool(rule(series_description))
+    if isinstance(rule, str):
+        rule = [rule]
+    if isinstance(rule, list):
+        return any(re.search(p, series_description, re.IGNORECASE) for p in rule)
     include = rule.get("include", [])
     exclude = rule.get("exclude", [])
     return all(s in series_description for s in include) and not any(s in series_description for s in exclude)

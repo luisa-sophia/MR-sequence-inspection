@@ -1,0 +1,6 @@
+pandas
+numpy
+pyyaml
+pydicom
+nibabel
+# heudiconv (or run it in apptainer, see README)

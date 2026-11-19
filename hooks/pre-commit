@@ -3,7 +3,8 @@
 # Enable once per clone:   git config core.hooksPath hooks
 # Bypass in an emergency:  git commit --no-verify
 
-PATTERN='(/mnt/|/media/|/home/|/Users/|[A-Za-z]:\\)'
+# Windows drive: a single letter (not the end of a word like 'Output:\n' in notebook json)
+PATTERN='(/mnt/|/media/|/home/|/Users/|(^|[^A-Za-z])[A-Za-z]:\\)'
 
 hits=$(git diff --cached -U0 --no-color -- . ':(exclude)*hooks/pre-commit' ':(exclude)*README.md' \
     | grep -E '^\+[^+]' | grep -E "$PATTERN")

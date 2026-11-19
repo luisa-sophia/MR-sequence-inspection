@@ -28,7 +28,7 @@ def _count_blocks(trs: list[int], trs_per_block: int, threshold: float) -> float
 def build_summary(cfg: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Returns:
-        summary: one row per session, one column per modality (1/0), plus optional fMRI block / file check columns
+        summary: one row per session, one column per modality (1/0, or number of scans if count_scans), plus optional fMRI block / file check columns
         counts:  how often each series_description occurs across all sessions
     """
     infos = {s: p for s, p in find_dicominfo_files(cfg, DICOMINFO_GLOB).items() if s not in cfg.exclude_sessions}
@@ -49,10 +49,11 @@ def build_summary(cfg: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
         for _, scan in df.iterrows():
             for modality, rule in cfg.modalities.items():
                 if matches(rule, scan["series_description"]):
-                    row[modality] = 1
+                    row[modality] = row[modality] + 1 if cfg.count_scans else 1
                     if fb and modality == fb["modality"]:
                         block_trs.append(int(scan["dim4"]))
-                    break  # rules are exclusive, first match wins
+                    if cfg.exclusive_rules:
+                        break  # first match wins
 
         if fb:
             row["fMRI_blocks"] = _count_blocks(block_trs, fb["trs_per_block"], fb["threshold"])
@@ -75,6 +76,9 @@ def _rule_as_text(rule) -> str:
             return repr(rule)
         # a lambda inside the modalities dict comes with its whole line ("T1w": lambda x: ...,)
         return src[src.find("lambda"):].rstrip(",") if rule.__name__ == "<lambda>" else f"function {rule.__name__}()"
+    if isinstance(rule, (str, list)):
+        patterns = [rule] if isinstance(rule, str) else rule
+        return "regex (case insensitive) " + " or ".join(f"'{p}'" for p in patterns)
     parts = []
     if rule.get("include"):
         parts.append("contains " + ", ".join(f"'{s}'" for s in rule["include"]))
@@ -85,7 +89,10 @@ def _rule_as_text(rule) -> str:
 
 def _rules_as_text(cfg: Config) -> str:
     lines = ["Rules used to classify scans, based on the dicom 'series_description'.",
-             "Checked in this order, first matching rule wins.", ""]
+             "Checked in this order, first matching rule wins." if cfg.exclusive_rules
+             else "A scan counts for every modality whose rule matches.",
+             "Values are the number of matching scans." if cfg.count_scans else "Values: 1 = found, 0 = not found.",
+             ""]
     width = max((len(m) for m in cfg.modalities), default=0) + 1
     lines += [f"{name + ':':{width}} {_rule_as_text(rule)}" for name, rule in cfg.modalities.items()]
 
