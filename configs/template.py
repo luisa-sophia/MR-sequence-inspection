@@ -43,6 +43,12 @@ container_image = "docker://nipy/heudiconv:1.5.1"
 # === BIDS conversion (optional): python -m seqinspect.convert configs/myproject.py --all
 bids_dir = None          # e.g. "path/to/BIDS" (relative to root, or absolute)
 bids_heuristic = None    # e.g. "heuristics/heuristic_myproject.py"
+# dicom template for the conversion (default: dcm_pattern). With '{session}', heudiconv runs once per session:
+# bids_dcm_pattern = f"{dicom_root}/sub-{{subject}}_ses-{{session}}/*/SCANS/*/DICOM/*.dcm"
+# extra input format besides sub-01_ses-B, e.g. "01B":
+# short_id_regex = r"^(?P<subject>\d+)(?P<session>[A-Za-z])$"
+# environment variables for the heuristic (folders of file paths are mounted in the container):
+# bids_env = {"HEUDICONV_TASKMAP": "path/to/task_map.tsv"}
 
 # === modality rules, checked against the dicom series_description
 # include: all substrings must be present, exclude: none may be present.

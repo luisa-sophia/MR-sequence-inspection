@@ -1,68 +1,142 @@
 """
 Step 3 (optional): convert the dicoms to a BIDS conform nifti dataset with heudiconv + your heuristic.
-For subjects WITHOUT session structure.
 
-Paths, heuristic and container come from the config (bids_dir, bids_heuristic, container, container_tmp).
+Paths, heuristic and container come from the config (bids_dir, bids_heuristic, bids_dcm_pattern,
+bids_env, container, container_tmp).
 
 From the terminal:
     python -m seqinspect.convert configs/myproject.py --subjects sub-01 sub-02
+    python -m seqinspect.convert configs/myproject.py --subjects sub-01_ses-A sub-20_ses-B   # with sessions
     python -m seqinspect.convert configs/myproject.py --all
     python -m seqinspect.convert --help
 
 From a notebook:
     convert(cfg, ["01", "02"])
 
-Subject ids are given with or without 'sub-'. heudiconv gets the id without it, so if
-the dicom folders are called sub-<id>, write 'sub-{subject}' in the dcm_pattern.
+Without sessions: ids are given with or without 'sub-'. heudiconv gets the id without it, so if
+the dicom folders are called sub-<id>, write 'sub-{subject}' in the pattern.
+With sessions ('{session}' in the pattern): ids are given as sub-<ID>_ses-<sess>, or in the format
+of short_id_regex (e.g. 01B). heudiconv runs once per session, as it can only do one session at a time.
 
 Author: Luisa Seckinger
 """
 import argparse
+import glob
 import os
+import re
 import sys
 
 from .config import Config, load_config
-from .dicominfo import (find_sessions, has_dicoms, heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions,
-                        session_pattern, stream)
+from .dicominfo import find_sessions, heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
+
+BIDS_ID = r"^sub-(?P<subject>[^_]+)(_ses-(?P<session>[^_]+))?$"
 
 
-def subject_ids(cfg: Config, subjects: list[str]) -> list[str]:
-    """Strip a leading 'sub-' and check that the dcm_pattern finds dicoms for every subject."""
-    ids = [s[4:] if s.startswith("sub-") else s for s in subjects]
-    missing = [s for s in ids if not has_dicoms(cfg, s)]
+def bids_pattern(cfg: Config) -> str:
+    return os.path.abspath(cfg.path(cfg.bids_dcm_pattern or cfg.dcm_pattern))
+
+
+def has_sessions(cfg: Config) -> bool:
+    return "{session}" in bids_pattern(cfg)
+
+
+def parse_id(cfg: Config, raw: str) -> tuple[str, str | None]:
+    """'sub-01', 'sub-01_ses-B', '01' or the short_id_regex format -> (subject, session or None)."""
+    with_session = has_sessions(cfg)
+    for regex in [BIDS_ID, cfg.short_id_regex]:
+        m = re.match(regex, raw) if regex else None
+        if m and (m.groupdict().get("session") is not None) == with_session:
+            return m["subject"], m.groupdict().get("session")
+    if not with_session:
+        return raw, None
+    raise ValueError(f"Unsupported subject/session format '{raw}', must be sub-<ID>_ses-<sess>"
+                     + (f" or match '{cfg.short_id_regex}'" if cfg.short_id_regex else "") + ".")
+
+
+def _pattern_for(cfg: Config, subject: str, session: str | None) -> str:
+    return bids_pattern(cfg).replace("{subject}", subject).replace("{session}", session or "")
+
+
+def parse_ids(cfg: Config, subjects: list[str], skip_unknown: bool = False) -> dict[str | None, list[str]]:
+    """
+    Parse the ids and check that the pattern finds dicoms for each of them.
+    Returns {session: [subjects]} ({None: [...]} without sessions).
+    skip_unknown: ids in an unsupported format are skipped with a warning instead of raising (for --all).
+    """
+    groups, missing = {}, []
+    for raw in subjects:
+        try:
+            subject, session = parse_id(cfg, raw)
+        except ValueError as e:
+            if not skip_unknown:
+                raise
+            print(f"WARNING: skipping folder '{raw}': {e}")
+            continue
+        if next(glob.iglob(_pattern_for(cfg, subject, session)), None) is None:
+            missing.append(_pattern_for(cfg, subject, session))
+        groups.setdefault(session, []).append(subject)
     if missing:
         raise FileNotFoundError(
-            f"No dicoms found for {missing}, e.g. with pattern '{session_pattern(cfg, missing[0])}'.\n"
-            "If the folders are called sub-<id>, use 'sub-{subject}' in the dcm_pattern.")
-    return ids
+            f"No dicoms found for {len(missing)} id(s), e.g. with pattern '{missing[0]}'.\n"
+            "If the folders are called sub-<id>, use 'sub-{subject}' in the pattern.")
+    return {ses: sorted(set(subs)) for ses, subs in sorted(groups.items(), key=lambda x: x[0] or "")}
 
 
-def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heuristic: str | None = None) -> int:
-    """Run heudiconv with the heuristic and dcm2niix for the given subjects (one heudiconv call). Returns the exit code."""
+def _env_binds(env: dict) -> list[str]:
+    """Absolute file paths in bids_env (their folders are mounted). Warns if a file doesn't exist."""
+    paths = []
+    for key, value in env.items():
+        if isinstance(value, str) and os.path.isabs(value):
+            if os.path.exists(value):
+                paths.append(value)
+            else:
+                print(f"WARNING: {key} '{value}' not found - the heuristic will fall back to its built-in default.")
+    return paths
+
+
+def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heuristic: str | None = None,
+            skip_unknown: bool = False) -> int:
+    """
+    Run heudiconv with the heuristic and dcm2niix for the given subjects
+    (one heudiconv call, or one per session). Returns the exit code.
+    """
     outdir = os.path.abspath(cfg.path(outdir or cfg.bids_dir))
     heuristic = heuristic_path(heuristic or cfg.bids_heuristic)
-    ids = subject_ids(cfg, subjects)
+    groups = parse_ids(cfg, subjects, skip_unknown=skip_unknown)
     os.makedirs(outdir, exist_ok=True)
 
     print_versions(cfg)
-    prefix_cmd, env = heudiconv_cmd(cfg, heudiconv_binds(cfg, outdir, heuristic))
-    cmd = prefix_cmd + [
-        "--dicom_dir_template", os.path.abspath(cfg.path(cfg.dcm_pattern)),
-        "--subjects", *ids,
-        "-f", heuristic,
-        "--minmeta",
-        "--converter", "dcm2niix",
-        "--outdir", outdir,
-        "-b",
-        "--overwrite",
-    ]
-    print(f"\n... starting heudiconv for subjects: {' '.join(ids)}")
-    status = stream(cmd, env, cwd="/" if cfg.container else None)
-    if status != 0:
-        print(f"\nERROR: heudiconv failed (exit code {status}) - check output above.")
-    else:
-        print(f"\n... ok, conversion completed! Processed subjects: {' '.join(ids)}")
-    return status
+    env_vars = {k: str(v) for k, v in cfg.bids_env.items()}
+    binds = heudiconv_binds(cfg, outdir, heuristic, *_env_binds(env_vars), pattern=bids_pattern(cfg))
+    prefix_cmd, env = heudiconv_cmd(cfg, binds, extra_env=env_vars)
+
+    for session, ids in groups.items():
+        cmd = prefix_cmd + [
+            "--dicom_dir_template", bids_pattern(cfg),
+            "--subjects", *ids,
+            *(["--ses", session] if session else []),
+            "-f", heuristic,
+            "--minmeta",
+            "--converter", "dcm2niix",
+            "--outdir", outdir,
+            "-b",
+            "--overwrite",
+        ]
+        print(f"\n... starting heudiconv{f' for session {session}' if session else ''}, subjects: {' '.join(ids)}")
+        status = stream(cmd, env, cwd="/" if cfg.container else None)
+        if status != 0:
+            print(f"\nERROR: heudiconv failed{f' for session {session}' if session else ''} "
+                  f"(exit code {status}) - check output above.")
+            return status
+
+    print(f"\n... ok, conversion completed! Processed: {_mapping_text(groups)}")
+    return 0
+
+
+def _mapping_text(groups: dict) -> str:
+    if None in groups:
+        return " ".join(groups[None])
+    return "".join(f"\n  Session {ses}: {' '.join(subs)}" for ses, subs in groups.items())
 
 
 def _confirm(question: str) -> bool:
@@ -70,10 +144,11 @@ def _confirm(question: str) -> bool:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Convert dicoms to a BIDS dataset with heudiconv (no session structure).")
+    parser = argparse.ArgumentParser(description="Convert dicoms to a BIDS dataset with heudiconv.")
     parser.add_argument("config", help="config file, e.g. configs/myproject.py")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--subjects", nargs="+", help="subject ids, with or without 'sub-'")
+    group.add_argument("--subjects", nargs="+",
+                       help="ids: sub-01 / 01, with sessions sub-01_ses-B (or the short_id_regex format)")
     group.add_argument("--all", action="store_true", help="all sessions found below dicom_root")
     parser.add_argument("--root", help="overrides root from the config")
     parser.add_argument("--outdir", help="overrides bids_dir from the config")
@@ -93,17 +168,19 @@ def main(argv=None):
         parser.error("bids_dir and bids_heuristic must be set in the config (or via --outdir / --heuristic).")
 
     try:
-        subject_ids(cfg, subjects)
-    except FileNotFoundError as e:
+        groups = parse_ids(cfg, subjects, skip_unknown=args.all)
+    except (ValueError, FileNotFoundError) as e:
         print(f"ERROR: {e}")
         sys.exit(1)
 
-    print(f"DICOM template: {cfg.path(cfg.dcm_pattern)}")
+    print(f"DICOM template: {bids_pattern(cfg)}")
     print(f"Output dir:     {outdir}")
     print(f"Heuristic:      {heuristic}")
+    for key, value in cfg.bids_env.items():
+        print(f"{key + ':':15} {value}")
     print(f"Container:      {cfg.container or 'none (installed heudiconv)'}"
           + (f"  ({cfg.container_image})" if cfg.container and not cfg.container.endswith(".sif") else ""))
-    print(f"Subjects:       {' '.join(subjects)}\n")
+    print(f"Subjects:       {_mapping_text(groups)}\n")
 
     if not args.yes:
         if not _confirm("Continue with these settings?"):
@@ -111,6 +188,8 @@ def main(argv=None):
         if os.path.isdir(outdir) and os.listdir(outdir) and not _confirm("Output directory exists and is not empty. Continue?"):
             sys.exit(1)
 
+    # the parsed ids (unsupported folders from --all are already dropped)
+    subjects = [f"sub-{sub}" + (f"_ses-{ses}" if ses else "") for ses, subs in groups.items() for sub in subs]
     sys.exit(convert(cfg, subjects, outdir=outdir, heuristic=heuristic))
 
 

@@ -135,18 +135,21 @@ def print_versions(cfg: Config):
     print(f"dcm2niix:       {_version_line(dcm2niix + ['--version'])}")
 
 
-def heudiconv_cmd(cfg: Config, bind: list[str]) -> tuple[list[str], dict]:
+def heudiconv_cmd(cfg: Config, bind: list[str], extra_env: dict | None = None) -> tuple[list[str], dict]:
     """
-    Command prefix + environment for heudiconv. With a container, the folders in `bind` are mounted.
-    All paths passed to heudiconv must then be absolute.
+    Command prefix + environment for heudiconv. With a container, the folders in `bind` are mounted
+    and `extra_env` is passed into the container. All paths passed to heudiconv must then be absolute.
     """
     # NO_ET: skip heudiconv's online version check (etelemetry), it only produces warnings
-    env = {**os.environ, "NO_ET": "1"}
+    extra_env = {"NO_ET": "1", **(extra_env or {})}
+    env = {**os.environ, **extra_env}
     if not cfg.container:
         return ["heudiconv"], env
 
     sif = _find_sif(cfg)
-    cmd = ["apptainer", "run", "--cleanenv", "--env", "PYTHONDONTWRITEBYTECODE=1,NO_ET=1"]
+    cmd = ["apptainer", "run", "--cleanenv"]
+    for key, value in {"PYTHONDONTWRITEBYTECODE": "1", **extra_env}.items():
+        cmd += ["--env", f"{key}={value}"]
     if cfg.container_tmp:
         tmp = os.path.abspath(cfg.path(cfg.container_tmp))
         work = os.path.join(tmp, "work")
@@ -159,9 +162,10 @@ def heudiconv_cmd(cfg: Config, bind: list[str]) -> tuple[list[str], dict]:
     return cmd, env
 
 
-def heudiconv_binds(cfg: Config, *paths: str) -> list[str]:
-    """Folders to mount in the container: the fixed part of the dcm_pattern, plus the given files/folders."""
-    dicom_base = os.path.dirname(cfg.path(cfg.dcm_pattern).split("{subject}")[0])
+def heudiconv_binds(cfg: Config, *paths: str, pattern: str | None = None) -> list[str]:
+    """Folders to mount in the container: the fixed part of the dicom pattern, plus the given files/folders."""
+    pattern = cfg.path(pattern or cfg.dcm_pattern)
+    dicom_base = os.path.dirname(pattern.split("{")[0])
     binds = [os.path.abspath(dicom_base)]
     for p in paths:
         if p and os.path.isabs(p):

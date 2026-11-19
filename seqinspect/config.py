@@ -17,6 +17,7 @@ Author: Luisa Seckinger
 import os
 import re
 import runpy
+import sys
 import types
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -66,6 +67,15 @@ class Config:
     bids_dir: str | None = None
     # heuristic .py for the conversion (relative to the notebook folder, or absolute)
     bids_heuristic: str | None = None
+    # dicom template for the conversion (default: dcm_pattern). Can contain '{session}' besides '{subject}',
+    # e.g. "sub-{subject}_ses-{session}/*/SCANS/*/DICOM/*.dcm" -> one heudiconv run per session (--ses)
+    bids_dcm_pattern: str | None = None
+    # additional input format for subject(+session) ids, with named groups, e.g. r"^(?P<subject>\d+)(?P<session>[A-Za-z])$"
+    # for "01B". "sub-01" / "sub-01_ses-B" always work.
+    short_id_regex: str | None = None
+    # environment variables for heudiconv, e.g. {"HEUDICONV_TASKMAP": "/path/to/task_map.tsv"} (read by the heuristic).
+    # With a container, the folders of existing file paths in here are mounted.
+    bids_env: dict = field(default_factory=dict)
 
     # === classification
     # name -> rule. A rule is one of:
@@ -119,8 +129,17 @@ def find_root_with_marker(start: Path, marker: str) -> Path:
 
 
 def _read_py(path: str) -> dict:
-    """Run a .py config and collect its public variables (helpers can be hidden with a leading '_')."""
-    return {k: v for k, v in runpy.run_path(path).items()
+    """
+    Run a .py config and collect its public variables (helpers can be hidden with a leading '_').
+    The config's folder is importable while it runs, so a config can import shared values from a file next to it.
+    """
+    config_dir = os.path.dirname(os.path.abspath(path))
+    sys.path.insert(0, config_dir)
+    try:
+        values = runpy.run_path(path)
+    finally:
+        sys.path.remove(config_dir)
+    return {k: v for k, v in values.items()
             if not k.startswith("_") and not isinstance(v, types.ModuleType)}
 
 
