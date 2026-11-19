@@ -3,13 +3,12 @@ Step 2: build an overview which sequences were run per session.
 
 Author: Luisa Seckinger
 """
+from __future__ import annotations
+
 import glob
 import inspect
 import os
 from pathlib import Path
-
-import numpy as np
-import pandas as pd
 
 from .config import Config, matches
 from .dicominfo import DICOMINFO_GLOB, find_dicominfo_files
@@ -22,6 +21,8 @@ def _file_check_sessions(cfg: Config, check: dict) -> set[str]:
 
 
 def _count_blocks(trs: list[int], trs_per_block: int, threshold: float) -> float:
+    import numpy as np
+
     return float(sum(np.round(tr / trs_per_block, 1) for tr in trs if tr / trs_per_block >= threshold))
 
 
@@ -31,6 +32,8 @@ def build_summary(cfg: Config) -> tuple[pd.DataFrame, pd.DataFrame]:
         summary: one row per session, one column per modality (1/0, or number of scans if count_scans), plus optional fMRI block / file check columns
         counts:  how often each series_description occurs across all sessions
     """
+    import pandas as pd
+
     infos = {s: p for s, p in find_dicominfo_files(cfg, DICOMINFO_GLOB).items() if s not in cfg.exclude_sessions}
     print(f"{len(infos)} sessions with dicominfo in '{cfg.out_dir}'.")
     file_checks = {name: _file_check_sessions(cfg, check) for name, check in cfg.file_checks.items()}
@@ -110,6 +113,8 @@ def _rules_as_text(cfg: Config) -> str:
 
 def write_outputs(cfg: Config, summary: pd.DataFrame, counts: pd.DataFrame):
     """Write summary (keeps manual 'Comments' from an existing file), counts and the rules used."""
+    import pandas as pd
+
     os.makedirs(cfg.out_dir, exist_ok=True)
     base = os.path.join(cfg.out_dir, cfg.identifier)
 

@@ -9,8 +9,6 @@ import os
 import subprocess
 import sys
 
-import pandas as pd
-
 from .config import APPTAINER_MISSING, Config, find_apptainer
 
 DICOMINFO_NAME = "dicominfo_mod-{subject}.tsv"  # cleaned file, {subject} = session id
@@ -76,6 +74,7 @@ def check_patient_names(cfg: Config, sessions: list[str]):
     Compare folder names with the dicom patient_name (reads the first dicom per session).
     Apart from naming conflicts, folders should be renamed to match the patient_name.
     """
+    import pandas as pd
     import pydicom
 
     rows = []
@@ -252,6 +251,8 @@ def clean_dicominfo(cfg: Config):
     Drop sensitive columns from the raw dicominfo.tsv files and save them as dicominfo_mod-<session>.tsv.
     For enhanced dicoms (custom heuristic), TR/TE are copied from the 'custom' column where heudiconv wrote -1.
     """
+    import pandas as pd
+
     for session, path in find_dicominfo_files(cfg, "dicominfo.tsv").items():
         df = pd.read_csv(path, sep="\t", encoding="latin-1", on_bad_lines="skip")
         msg = ""

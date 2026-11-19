@@ -24,8 +24,6 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Callable
 
-import yaml
-
 
 @dataclass
 class Config:
@@ -165,6 +163,7 @@ def load_config(path: str | None = None, **overrides) -> Config:
         if path.endswith(".py"):
             values = _read_py(path)
         else:
+            import yaml  # only needed for .yaml configs
             with open(path) as f:
                 values = yaml.safe_load(f) or {}
     values.update(overrides)
