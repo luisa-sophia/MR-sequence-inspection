@@ -5,7 +5,7 @@ Everything in configs/ except this template and the shared MRE configs is gitign
 All public variables are read as config options (unknown names raise an error),
 so prefix helper variables with '_'.
 """
-
+from container_config import container as _container, container_tmp as _container_tmp, container_image as _container_image
 identifier = "PROJECT1"
 
 # Prefix for all relative paths below (e.g. where the lab drive is mounted).
@@ -16,10 +16,9 @@ root = None
 
 # === DICOM input (relative to root, or absolute)
 dicom_root = "path/to/dicom/root"
-# heudiconv template, must contain {subject}
+# heudiconv template, must contain {subject}.
+# Sessions = the folders at the position of {subject} in which the pattern finds dicoms
 dcm_pattern = f"{dicom_root}/{{subject}}/SCANS/*/DICOM/*.dcm"
-# a folder is a session if it contains this subfolder (None: every subfolder of dicom_root)
-session_marker = "SCANS"
 ignore = ["pilot", "__MACOSX"]  # skip folders containing these strings (case insensitive)
 exclude_sessions = []
 

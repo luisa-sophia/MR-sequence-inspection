@@ -11,7 +11,6 @@ root_marker = ".drive_root.txt"
 dicom_root = "MR_Data/Raw/MRE/3T_Skyra"
 # all subjects of one scanner need the same folder hierarchy, otherwise heudiconv processes 0 files
 dcm_pattern = f"{dicom_root}/{{subject}}/*/*/*.[dI][cM][mA]"
-session_marker = None    # every subfolder of dicom_root is a session
 ignore = ["__MACOSX"]    # temp folder from apple
 
 # === output: <drive root>/Scan_Summaries/MRE/3T_Skyra

@@ -65,7 +65,8 @@ In `out_dir` (`output/<identifier>/`, or `<root>/<output_dir>/<identifier>/` wit
 - `<identifier>_rules.txt`: the rules that were used, in readable form
 - `MRE_metadata_summary_<label>.tsv` (MRE crawler), previous versions in `backups/`
 
-Sessions whose folder doesn't match `dcm_pattern` are skipped by heudiconv with a warning.
+Sessions are the folders at the position of `{subject}` in `dcm_pattern` in which the pattern finds dicoms.
+Other folders there are skipped with a note.
 
 ## BIDS conversion
 
@@ -84,7 +85,7 @@ are called `sub-<id>`, write `sub-{subject}` in the `dcm_pattern`.
 **With sessions:** set a `bids_dcm_pattern` containing `{session}`, e.g.
 `sub-{subject}_ses-{session}/*/SCANS/*/DICOM/*.dcm`. Ids are then given as `sub-01_ses-B`
 (or in the format of `short_id_regex`, e.g. `01B`), and heudiconv runs once per session (`--ses`).
-For the notebooks keep `dcm_pattern = f"{dicom_root}/{{subject}}/*/SCANS/..."` with `session_marker = None`,
+For the notebooks keep `dcm_pattern = f"{dicom_root}/{{subject}}/*/SCANS/..."`,
 there a session is simply the whole folder name. Environment variables the heuristic reads
 (e.g. `HEUDICONV_TASKMAP`) go in `bids_env`.
 In a notebook: `from seqinspect.convert import convert; convert(cfg, ["01", "02"])`.

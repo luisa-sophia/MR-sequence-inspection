@@ -24,23 +24,30 @@ def _is_ignored(cfg: Config, name: str) -> bool:
 
 
 def find_sessions(cfg: Config) -> list[str]:
-    """Return the session ids (folder names) found below dicom_root."""
-    dicom_root = cfg.path(cfg.dicom_root)
-    if not os.path.isdir(dicom_root):
-        raise FileNotFoundError(f"dicom_root does not exist: '{dicom_root}'")
+    """
+    Return the session ids found with the dcm_pattern: the folders at the position of '{subject}'
+    (e.g. dicom_root/<session>/SCANS/...) for which the pattern finds at least one dicom.
+    """
+    pattern = cfg.path(cfg.dcm_pattern)
+    if "{subject}" not in pattern:
+        raise ValueError("dcm_pattern must contain the placeholder '{subject}'.")
+    # the folder level with {subject}, e.g. "sub-{subject}" -> prefix "sub-", suffix ""
+    before, after = pattern.split("{subject}", 1)
+    parent, prefix = os.path.split(before)
+    suffix = after.split(os.sep, 1)[0]
+    if not os.path.isdir(parent):
+        raise FileNotFoundError(f"Folder with the sessions does not exist: '{parent}'")
 
-    sessions = []
-    if cfg.session_marker is None:
-        sessions = [d for d in os.listdir(dicom_root)
-                    if os.path.isdir(os.path.join(dicom_root, d)) and not _is_ignored(cfg, d)]
-    else:
-        for root, dirs, _ in os.walk(dicom_root, topdown=True):
-            dirs[:] = [d for d in dirs if not _is_ignored(cfg, d)]
-            if cfg.session_marker in dirs:
-                sessions.append(os.path.basename(root))
-                dirs[:] = []  # don't walk into the session (scans and any other subfolders)
+    candidates = [d[len(prefix):len(d) - len(suffix)] for d in os.listdir(parent)
+                  if d.startswith(prefix) and d.endswith(suffix) and len(d) > len(prefix) + len(suffix)
+                  and os.path.isdir(os.path.join(parent, d)) and not _is_ignored(cfg, d)]
+    candidates = [s for s in candidates if s not in cfg.exclude_sessions]
 
-    sessions = [s for s in sessions if s not in cfg.exclude_sessions]
+    sessions, no_dicoms = [], []
+    for s in candidates:
+        (sessions if has_dicoms(cfg, s) else no_dicoms).append(s)
+    if no_dicoms:
+        print(f"{len(no_dicoms)} folder(s) skipped, no dicoms matched the dcm_pattern: {sorted(no_dicoms)}")
     return sorted(sessions, key=cfg.sort_key)
 
 

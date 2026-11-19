@@ -39,10 +39,9 @@ class Config:
     # === DICOM input
     # folder that is searched for sessions
     dicom_root: str = ""
-    # heudiconv dicom template, must contain the placeholder '{subject}'
+    # heudiconv dicom template, must contain the placeholder '{subject}'.
+    # Sessions = the folders at the position of {subject} in which the pattern finds dicoms
     dcm_pattern: str = ""
-    # a folder is a session if it contains this subfolder (None: every direct subfolder of dicom_root is a session)
-    session_marker: str | None = "SCANS"
     # skip folders whose name contains one of these strings (case insensitive)
     ignore: list[str] = field(default_factory=lambda: ["pilot"])
     ignore_hidden: bool = True
@@ -169,6 +168,10 @@ def load_config(path: str | None = None, **overrides) -> Config:
             with open(path) as f:
                 values = yaml.safe_load(f) or {}
     values.update(overrides)
+    if "session_marker" in values:
+        values.pop("session_marker")
+        print(f"Note: 'session_marker' is no longer used (sessions are found with the dcm_pattern), "
+              f"you can remove it from '{path}'.")
 
     known = {f.name for f in fields(Config)}
     unknown = set(values) - known
