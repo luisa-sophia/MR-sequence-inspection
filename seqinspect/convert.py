@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-from .config import Config, load_config
+from .config import APPTAINER_MISSING, Config, find_apptainer, load_config
 from .dicominfo import find_sessions, heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
 
 BIDS_ID = r"^sub-(?P<subject>[^_]+)(_ses-(?P<session>[^_]+))?$"
@@ -161,6 +161,10 @@ def main(argv=None):
     print("=" * 85 + "\n")
 
     cfg = load_config(args.config, **({"root": args.root} if args.root else {}))
+    if cfg.container and not find_apptainer():
+        print(f"ERROR: {APPTAINER_MISSING}")
+        sys.exit(1)
+
     subjects = find_sessions(cfg) if args.all else args.subjects
     outdir = os.path.abspath(cfg.path(args.outdir or cfg.bids_dir or ""))
     heuristic = args.heuristic or cfg.bids_heuristic

@@ -11,7 +11,7 @@ import sys
 
 import pandas as pd
 
-from .config import Config
+from .config import APPTAINER_MISSING, Config, find_apptainer
 
 DICOMINFO_NAME = "dicominfo_mod-{subject}.tsv"  # cleaned file, {subject} = session id
 DICOMINFO_GLOB = DICOMINFO_NAME.replace("{subject}", "*")
@@ -38,7 +38,7 @@ def find_sessions(cfg: Config) -> list[str]:
             dirs[:] = [d for d in dirs if not _is_ignored(cfg, d)]
             if cfg.session_marker in dirs:
                 sessions.append(os.path.basename(root))
-                dirs.remove(cfg.session_marker)  # don't walk into the scans
+                dirs[:] = []  # don't walk into the session (scans and any other subfolders)
 
     sessions = [s for s in sessions if s not in cfg.exclude_sessions]
     return sorted(sessions, key=cfg.sort_key)
@@ -93,6 +93,14 @@ def heuristic_path(heuristic: str) -> str:
     return heuristic
 
 
+def _apptainer() -> str:
+    """The apptainer executable (or singularity, its older name)."""
+    path = find_apptainer()
+    if not path:
+        raise FileNotFoundError(APPTAINER_MISSING)
+    return path
+
+
 def _find_sif(cfg: Config) -> str:
     """
     The container image file. cfg.container is a .sif file (used as it is), or a folder:
@@ -106,7 +114,7 @@ def _find_sif(cfg: Config) -> str:
         sif = os.path.join(container, f"heudiconv_{version}.sif")
     if not os.path.isfile(sif):
         print(f"No heudiconv .sif file found - pulling {cfg.container_image} ...")
-        subprocess.run(["apptainer", "pull", sif, cfg.container_image], check=True)
+        subprocess.run([_apptainer(), "pull", sif, cfg.container_image], check=True)
         print(f"Pulled image to: {sif}")
     return sif
 
@@ -126,8 +134,8 @@ def print_versions(cfg: Config):
     if cfg.container:
         sif = _find_sif(cfg)
         print(f"Container:      {sif}")
-        heudiconv = ["apptainer", "exec", "--cleanenv", sif, "heudiconv"]
-        dcm2niix = ["apptainer", "exec", "--cleanenv", sif, "dcm2niix"]
+        heudiconv = [_apptainer(), "exec", "--cleanenv", sif, "heudiconv"]
+        dcm2niix = [_apptainer(), "exec", "--cleanenv", sif, "dcm2niix"]
     else:
         print("Container:      none (installed heudiconv)")
         heudiconv, dcm2niix = ["heudiconv"], ["dcm2niix"]
@@ -147,7 +155,7 @@ def heudiconv_cmd(cfg: Config, bind: list[str], extra_env: dict | None = None) -
         return ["heudiconv"], env
 
     sif = _find_sif(cfg)
-    cmd = ["apptainer", "run", "--cleanenv"]
+    cmd = [_apptainer(), "run", "--cleanenv"]
     for key, value in {"PYTHONDONTWRITEBYTECODE": "1", **extra_env}.items():
         cmd += ["--env", f"{key}={value}"]
     if cfg.container_tmp:
