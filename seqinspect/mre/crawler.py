@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import metadata as mre_metadata
+from . import summary_tsv
 from dataclasses import asdict
 
 
@@ -42,18 +42,18 @@ class MREMetadataCrawler:
 
     def load_existing_summary(self) -> pd.DataFrame:
         """Load the current summary TSV for this crawler."""
-        return mre_metadata.load_existing_summary(self.paths.output_tsv_path)
+        return summary_tsv.load_existing_summary(self.paths.output_tsv_path)
 
     def list_available_subjects(self) -> list[str]:
         """List all subject folders currently available under the crawler's DICOM root."""
-        return mre_metadata.list_available_subjects(
+        return summary_tsv.list_available_subjects(
             self.paths.dicom_root,
             ignore_hidden=self.ignore_hidden,
         )
 
     def get_missing_subjects(self) -> list[str]:
         """List subject folders that are not yet present in the summary TSV."""
-        return mre_metadata.get_missing_subjects(
+        return summary_tsv.get_missing_subjects(
             self.paths.output_tsv_path,
             self.paths.dicom_root,
             ignore_hidden=self.ignore_hidden,
@@ -106,7 +106,7 @@ class MREMetadataCrawler:
         for subject in subject_list:
             print("-", subject)
 
-        return mre_metadata.update_summary_tsv(
+        return summary_tsv.update_summary_tsv(
             self.paths.folder_pattern_template,
             self.paths.output_tsv_path,
             subject_list=subject_list,
