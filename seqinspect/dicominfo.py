@@ -1,52 +1,20 @@
 """
-Step 1: find sessions, run heudiconv on them and clean the resulting dicominfo.tsv files.
+Step 1: run heudiconv on the sessions (info files only, no conversion) and clean the resulting dicominfo.tsv files.
 
 Author: Luisa Seckinger
 """
 import ast
 import glob
 import os
-import subprocess
-import sys
 
-from .config import APPTAINER_MISSING, Config, find_apptainer
+from .config import Config
+from .heudiconv import heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
+from .sessions import has_dicoms, session_pattern
 
 DICOMINFO_NAME = "dicominfo_mod-{subject}.tsv"  # cleaned file, {subject} = session id
+
+
 DICOMINFO_GLOB = DICOMINFO_NAME.replace("{subject}", "*")
-
-
-def _is_ignored(cfg: Config, name: str) -> bool:
-    if cfg.ignore_hidden and name.startswith("."):
-        return True
-    return any(s.lower() in name.lower() for s in cfg.ignore)
-
-
-def find_sessions(cfg: Config) -> list[str]:
-    """
-    Return the session ids found with the dcm_pattern: the folders at the position of '{subject}'
-    (e.g. dicom_root/<session>/SCANS/...) for which the pattern finds at least one dicom.
-    """
-    pattern = cfg.path(cfg.dcm_pattern)
-    if "{subject}" not in pattern:
-        raise ValueError("dcm_pattern must contain the placeholder '{subject}'.")
-    # the folder level with {subject}, e.g. "sub-{subject}" -> prefix "sub-", suffix ""
-    before, after = pattern.split("{subject}", 1)
-    parent, prefix = os.path.split(before)
-    suffix = after.split(os.sep, 1)[0]
-    if not os.path.isdir(parent):
-        raise FileNotFoundError(f"Folder with the sessions does not exist: '{parent}'")
-
-    candidates = [d[len(prefix):len(d) - len(suffix)] for d in os.listdir(parent)
-                  if d.startswith(prefix) and d.endswith(suffix) and len(d) > len(prefix) + len(suffix)
-                  and os.path.isdir(os.path.join(parent, d)) and not _is_ignored(cfg, d)]
-    candidates = [s for s in candidates if s not in cfg.exclude_sessions]
-
-    sessions, no_dicoms = [], []
-    for s in candidates:
-        (sessions if has_dicoms(cfg, s) else no_dicoms).append(s)
-    if no_dicoms:
-        print(f"{len(no_dicoms)} folder(s) skipped, no dicoms matched the dcm_pattern: {sorted(no_dicoms)}")
-    return sorted(sessions, key=cfg.sort_key)
 
 
 def find_dicominfo_files(cfg: Config, pattern: str = "dicominfo*.tsv") -> dict[str, str]:
@@ -57,143 +25,6 @@ def find_dicominfo_files(cfg: Config, pattern: str = "dicominfo*.tsv") -> dict[s
         full = os.path.join(cfg.out_dir, p)
         found[os.path.basename(os.path.dirname(os.path.dirname(full)))] = full
     return found
-
-
-def session_pattern(cfg: Config, session: str) -> str:
-    """The dcm_pattern filled in for one session."""
-    return cfg.path(cfg.dcm_pattern.replace("{subject}", session))
-
-
-def has_dicoms(cfg: Config, session: str) -> bool:
-    """True if the dcm_pattern matches at least one file for this session (stops at the first match)."""
-    return next(glob.iglob(session_pattern(cfg, session)), None) is not None
-
-
-def check_patient_names(cfg: Config, sessions: list[str]):
-    """
-    Compare folder names with the dicom patient_name (reads the first dicom per session).
-    Apart from naming conflicts, folders should be renamed to match the patient_name.
-    """
-    import pandas as pd
-    import pydicom
-
-    rows = []
-    for session in sessions:
-        first = next(glob.iglob(session_pattern(cfg, session)), None)
-        if first is None:
-            print(f"Skipping folder '{session}': no match for '{session_pattern(cfg, session)}'.")
-            continue
-        patient_name = str(pydicom.dcmread(first, stop_before_pixels=True).PatientName).replace("^", "")
-        rows.append({"foldername": session, "patient_name": patient_name, "is match?": session == patient_name})
-    return pd.DataFrame(rows)
-
-
-# --- running heudiconv (installed or in an apptainer container) --------------
-
-def heuristic_path(heuristic: str) -> str:
-    """A heuristic .py file becomes an absolute path, a built-in heuristic name (e.g. 'convertall') stays."""
-    if heuristic.endswith(".py"):
-        if not os.path.isfile(heuristic):
-            raise FileNotFoundError(f"The specified heuristic file does not exist: '{heuristic}'")
-        return os.path.abspath(heuristic)
-    return heuristic
-
-
-def _apptainer() -> str:
-    """The apptainer executable (or singularity, its older name)."""
-    path = find_apptainer()
-    if not path:
-        raise FileNotFoundError(APPTAINER_MISSING)
-    return path
-
-
-def _find_sif(cfg: Config) -> str:
-    """
-    The container image file. cfg.container is a .sif file (used as it is), or a folder:
-    then heudiconv_<version>.sif for the version in cfg.container_image (pulled if missing).
-    """
-    container = cfg.path(cfg.container)
-    if container.endswith(".sif"):
-        sif = container
-    else:
-        version = cfg.container_image.rsplit(":", 1)[-1] if ":" in cfg.container_image.split("/")[-1] else "latest"
-        sif = os.path.join(container, f"heudiconv_{version}.sif")
-    if not os.path.isfile(sif):
-        print(f"No heudiconv .sif file found - pulling {cfg.container_image} ...")
-        subprocess.run([_apptainer(), "pull", sif, cfg.container_image], check=True)
-        print(f"Pulled image to: {sif}")
-    return sif
-
-
-def _version_line(cmd: list[str]) -> str:
-    """First output line of a version command (or why it failed)."""
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return f"unknown ({e})"
-    lines = [l.strip() for l in (out.stdout + out.stderr).splitlines() if l.strip()]
-    return next((l for l in lines if "version" in l.lower()), lines[0] if lines else "unknown")
-
-
-def print_versions(cfg: Config):
-    """Print the heudiconv and dcm2niix versions that will be used (installed or in the container)."""
-    if cfg.container:
-        sif = _find_sif(cfg)
-        print(f"Container:      {sif}")
-        heudiconv = [_apptainer(), "exec", "--cleanenv", sif, "heudiconv"]
-        dcm2niix = [_apptainer(), "exec", "--cleanenv", sif, "dcm2niix"]
-    else:
-        print("Container:      none (installed heudiconv)")
-        heudiconv, dcm2niix = ["heudiconv"], ["dcm2niix"]
-    print(f"heudiconv:      {_version_line(heudiconv + ['--version'])}")
-    print(f"dcm2niix:       {_version_line(dcm2niix + ['--version'])}")
-
-
-def heudiconv_cmd(cfg: Config, bind: list[str], extra_env: dict | None = None) -> tuple[list[str], dict]:
-    """
-    Command prefix + environment for heudiconv. With a container, the folders in `bind` are mounted
-    and `extra_env` is passed into the container. All paths passed to heudiconv must then be absolute.
-    """
-    # NO_ET: skip heudiconv's online version check (etelemetry), it only produces warnings
-    extra_env = {"NO_ET": "1", **(extra_env or {})}
-    env = {**os.environ, **extra_env}
-    if not cfg.container:
-        return ["heudiconv"], env
-
-    sif = _find_sif(cfg)
-    cmd = [_apptainer(), "run", "--cleanenv"]
-    for key, value in {"PYTHONDONTWRITEBYTECODE": "1", **extra_env}.items():
-        cmd += ["--env", f"{key}={value}"]
-    if cfg.container_tmp:
-        tmp = os.path.abspath(cfg.path(cfg.container_tmp))
-        work = os.path.join(tmp, "work")
-        os.makedirs(os.path.join(tmp, "tmp"), exist_ok=True)
-        os.makedirs(work, exist_ok=True)
-        env.update(APPTAINER_TMPDIR=os.path.join(tmp, "tmp"), APPTAINER_CACHEDIR=tmp)
-        cmd += ["-H", work]
-        bind = bind + [tmp]
-    cmd += ["--bind", ",".join(f"{p}:{p}" for p in dict.fromkeys(bind)), sif]
-    return cmd, env
-
-
-def heudiconv_binds(cfg: Config, *paths: str, pattern: str | None = None) -> list[str]:
-    """Folders to mount in the container: the fixed part of the dicom pattern, plus the given files/folders."""
-    pattern = cfg.path(pattern or cfg.dcm_pattern)
-    dicom_base = os.path.dirname(pattern.split("{")[0])
-    binds = [os.path.abspath(dicom_base)]
-    for p in paths:
-        if p and os.path.isabs(p):
-            binds.append(p if os.path.isdir(p) else os.path.dirname(p))
-    return binds
-
-
-def stream(cmd: list[str], env: dict, cwd: str | None = None) -> int:
-    """Run a command and print its output live. Returns the exit code."""
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=cwd)
-    for line in iter(process.stdout.readline, ""):
-        print(line.rstrip())
-        sys.stdout.flush()
-    return process.wait()
 
 
 def run_heudiconv(cfg: Config, sessions: list[str], force: bool = False, dryrun: bool = False) -> list[str]:

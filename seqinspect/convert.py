@@ -27,7 +27,8 @@ import re
 import sys
 
 from .config import APPTAINER_MISSING, Config, find_apptainer, load_config
-from .dicominfo import find_sessions, heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
+from .heudiconv import heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
+from .sessions import find_sessions
 
 BIDS_ID = r"^sub-(?P<subject>[^_]+)(_ses-(?P<session>[^_]+))?$"
 

@@ -17,12 +17,13 @@ Author: Luisa Seckinger
 import os
 import re
 import runpy
-import shutil
 import sys
 import types
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Callable
+
+from .container import APPTAINER_MISSING, find_apptainer
 
 
 @dataclass
@@ -121,17 +122,6 @@ class Config:
         print("=" * 72)
         if self.container and not find_apptainer():
             print(f"WARNING: {APPTAINER_MISSING}")
-
-
-APPTAINER_MISSING = (
-    "'container' is set, but neither 'apptainer' nor 'singularity' is found in PATH, heudiconv can't run. "
-    "Run it where apptainer is installed (not inside a container, e.g. a workbench), after 'module load apptainer' "
-    "if needed. Or set container = None to use an installed heudiconv.")
-
-
-def find_apptainer() -> str | None:
-    """Path of the apptainer executable (or singularity, its older name), None if neither is in PATH."""
-    return shutil.which("apptainer") or shutil.which("singularity")
 
 
 def find_root_with_marker(start: Path, marker: str) -> Path:
