@@ -12,8 +12,18 @@ Merged from `MR-sequence-inspection` and `MRE-sequence-inspection` (both histori
 configs/template.py     # tracked dummy config, copy it to configs/<name>.py
 configs/mre_7T.py       # tracked MRE configs (only paths relative to the drive root)
 configs/mre_3T.py
-seqinspect/             # the logic (config, heudiconv step, summary step, conversion)
+seqinspect/             # the logic
+  config.py             #   Config, load_config
+  sessions.py           #   finding the session folders, checking them against the dicom headers
+  heudiconv.py          #   calling heudiconv (installed or in a container)
+  container.py          #   apptainer/singularity, heudiconv .sif image
+  dicominfo.py          #   step 1: dicominfo.tsv per session, cleaning
+  summary.py            #   step 2: summary tables
+  convert.py            #   step 3: BIDS conversion
 seqinspect/mre/         # MRE metadata crawler (needs pydicom, nibabel)
+  metadata.py           #   reading the MRE metadata from the dicom headers
+  summary_tsv.py        #   the summary TSV: missing subjects, adding rows, backups
+  crawler.py            #   ties both together per scanner config
 heuristics/             # heudiconv heuristics, e.g. for enhanced dicoms (XB10)
 hooks/pre-commit        # blocks commits that contain absolute paths
 output/<identifier>/    # results (gitignored)
