@@ -134,10 +134,30 @@ def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heurist
     return 0
 
 
+# def _mapping_text(groups: dict) -> str:
+#     if None in groups:
+#         return " ".join(groups[None])
+#     return "".join(f"\n  Session {ses}: {' '.join(subs)}" for ses, subs in groups.items())
+
 def _mapping_text(groups: dict) -> str:
     if None in groups:
         return " ".join(groups[None])
-    return "".join(f"\n  Session {ses}: {' '.join(subs)}" for ses, subs in groups.items())
+
+    by_subject = {}
+    for ses, subs in groups.items():
+        for sub in subs:
+            by_subject.setdefault(sub, []).append(ses)
+
+    # group by whichever has fewer distinct values (tie: by subject)
+    if len(by_subject) <= len(groups):
+        outer, inner, mapping = "Subject", "Session", by_subject
+    else:
+        outer, inner, mapping = "Session", "Subject", groups
+
+    return "".join(
+        f"\n  {outer} {key}:" + "".join(f"\n    - {inner} {item}" for item in items)
+        for key, items in mapping.items()
+    )
 
 
 def _confirm(question: str) -> bool:
