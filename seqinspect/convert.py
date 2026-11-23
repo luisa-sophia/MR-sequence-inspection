@@ -30,8 +30,7 @@ from .config import APPTAINER_MISSING, Config, find_apptainer, load_config
 from .heudiconv import heudiconv_binds, heudiconv_cmd, heuristic_path, print_versions, stream
 from .sessions import find_sessions
 
-BIDS_ID = r"^sub-(?P<subject>[^_]+)(_ses-(?P<session>[^_]+))?$"
-
+BIDS_ID = r"^sub-(?P<subject>[^_]+)(_ses-(?P<session>[^_]+))?(_.*)?$" #allow also suffixes after ses but they wont be taken in 
 
 def bids_pattern(cfg: Config) -> str:
     return os.path.abspath(cfg.path(cfg.bids_dcm_pattern or cfg.dcm_pattern))
@@ -131,6 +130,7 @@ def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heurist
             return status
 
     print(f"\n... ok, conversion completed! Processed: {_mapping_text(groups)}")
+    
     return 0
 
 
