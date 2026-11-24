@@ -95,10 +95,13 @@ def _env_binds(env: dict) -> list[str]:
 
 
 def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heuristic: str | None = None,
-            skip_unknown: bool = False) -> int:
+            skip_unknown: bool = False, overwrite: bool = True) -> int:
     """
     Run heudiconv with the heuristic and dcm2niix for the given subjects
     (one heudiconv call, or one per session). Returns the exit code.
+
+    Note that the overwrite flag is not behaving as you would expect. 
+    Not passing it will cause heudiconv to fail on already processed subjects.
     """
     outdir = os.path.abspath(cfg.path(outdir or cfg.bids_dir))
     heuristic = heuristic_path(heuristic or cfg.bids_heuristic)
@@ -110,6 +113,7 @@ def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heurist
     binds = heudiconv_binds(cfg, outdir, heuristic, *_env_binds(env_vars), pattern=bids_pattern(cfg))
     prefix_cmd, env = heudiconv_cmd(cfg, binds, extra_env=env_vars)
 
+    ok, failed = {}, {}
     for session, ids in groups.items():
         cmd = prefix_cmd + [
             "--dicom_dir_template", bids_pattern(cfg),
@@ -120,18 +124,29 @@ def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heurist
             "--converter", "dcm2niix",
             "--outdir", outdir,
             "-b",
-            "--overwrite",
+            *(["--overwrite"] if overwrite else [])
         ]
-        print(f"\n... starting heudiconv{f' for session {session}' if session else ''}, subjects: {' '.join(ids)}")
+        sess_string = f" for session {session}" if session else ""
+        print(f"\n... starting heudiconv{sess_string}, subject(s): {' '.join(ids)}")
         status = stream(cmd, env, cwd="/" if cfg.container else None)
-        if status != 0:
-            print(f"\nERROR: heudiconv failed{f' for session {session}' if session else ''} "
-                  f"(exit code {status}) - check output above.")
-            return status
+        if status == 0:
+            ok[session] = ids
+        else:
+            print(f"\nERROR: heudiconv failed{sess_string}, subject(s): {' '.join(ids)} (exit code {status}) - continuing with the next session.")
+            failed[session] = ids
+            
+
+    print("\n" + "=" * 85)
+    if ok:
+        print(f"Converted: {_mapping_text(ok)}")
+    if failed:
+        print(f"FAILED, heudiconv call did not finish for the following sessions: {_mapping_text(failed)}")
+        print("Check the output above for the errors.")
+    print("=" * 85)
 
     print(f"\n... ok, conversion completed! Processed: {_mapping_text(groups)}")
     
-    return 0
+    return 1 if failed else 0
 
 
 # def _mapping_text(groups: dict) -> str:
@@ -174,6 +189,7 @@ def main(argv=None):
     parser.add_argument("--root", help="overrides root from the config")
     parser.add_argument("--outdir", help="overrides bids_dir from the config")
     parser.add_argument("--heuristic", help="overrides bids_heuristic from the config")
+    parser.add_argument("--no-overwrite", action="store_true", help="don't pass --overwrite to heudiconv. It will fail on subjects that have already been processed.")
     parser.add_argument("-y", "--yes", action="store_true", help="don't ask for confirmation (e.g. in batch jobs)")
     args = parser.parse_args(argv)
 
@@ -207,15 +223,17 @@ def main(argv=None):
           + (f"  ({cfg.container_image})" if cfg.container and not cfg.container.endswith(".sif") else ""))
     print(f"Subjects:       {_mapping_text(groups)}\n")
 
+    overwrite = not args.no_overwrite
+
     if not args.yes:
         if not _confirm("Continue with these settings?"):
             sys.exit(1)
-        if os.path.isdir(outdir) and os.listdir(outdir) and not _confirm("Output directory exists and is not empty. Continue?"):
+        if os.path.isdir(outdir) and os.listdir(outdir) and not _confirm(f"Output directory exists and is not empty. Overwrite {'enabled' if overwrite else 'disabled'}. Continue?"):
             sys.exit(1)
 
     # the parsed ids (unsupported folders from --all are already dropped)
     subjects = [f"sub-{sub}" + (f"_ses-{ses}" if ses else "") for ses, subs in groups.items() for sub in subs]
-    sys.exit(convert(cfg, subjects, outdir=outdir, heuristic=heuristic))
+    sys.exit(convert(cfg, subjects, outdir=outdir, heuristic=heuristic, overwrite = overwrite))
 
 
 if __name__ == "__main__":
