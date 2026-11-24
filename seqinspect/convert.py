@@ -143,8 +143,6 @@ def convert(cfg: Config, subjects: list[str], outdir: str | None = None, heurist
         print(f"FAILED, heudiconv call did not finish for the following sessions: {_mapping_text(failed)}")
         print("Check the output above for the errors.")
     print("=" * 85)
-
-    print(f"\n... ok, conversion completed! Processed: {_mapping_text(groups)}")
     
     return 1 if failed else 0
 
